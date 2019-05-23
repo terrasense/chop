@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from argparse import ArgumentParser
-import os, multiprocessing, gdal
+import os, multiprocessing, gdal, random
 from math import sqrt
 from PIL import Image
 
@@ -107,7 +107,7 @@ def tilePolygon(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_
     xlist = np.arange(xmin-x_size/2, xmax, stride)
     ylist = np.arange(ymin-y_size/2, ymax, stride)
     if (len(xlist) <= 1):
-        xlist = [xmin-x_size/2, xmin, random.uniform(xmin-x_size/2, xmax-xsize), xmax-x_size]
+        xlist = [xmin-x_size/2, xmin, random.uniform(xmin-x_size/2, xmax-x_size), xmax-x_size]
     if (len(ylist) <= 1):
         ylist = [ymin-y_size/2, ymin, random.uniform(ymin-y_size/2, ymax-y_size),ymax-y_size]
     if (get_size_params):
