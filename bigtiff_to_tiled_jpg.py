@@ -1,4 +1,4 @@
-import gdal, os, multiprocessing
+import gdal, os, multiprocessing, re
 from joblib import Parallel, delayed
 from PIL import Image
 from tqdm import tqdm
@@ -43,15 +43,16 @@ def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, file, out_forma
         gdal.Translate(new_img, tif, projWin=projWin, width=out_width, height=out_height)
     del tif
 
-def tifToTiles(tif_path, masks_folder, out_format='jpg', **kwargs):
-    print('Starting to convert tif to tiled images.', tif_path)
+def tifToTiles(tif_path, masks_folder, out_format, mask_folder_id, **kwargs):
     mask_files = os.listdir(masks_folder)
-    out_folder = tif_path.replace('.tif', str(r'_img_tiles'))
+    masks_object = re.sub(mask_folder_id, '', masks_folder.split('\\')[-1])
+    out_folder = tif_path.replace('.tif', str(r'_img_tiles')) + '_' + masks_object
     try:
         os.mkdir(out_folder)
     except Exception as e:
         print('Files seem to already exist. Remove them if new ones are needed.', out_folder)
         return
+    print('Starting to convert tif to tiled images.', tif_path)
     num_cores = multiprocessing.cpu_count()
     Parallel(n_jobs=num_cores)(delayed(cropTifToMaskCoordinates)(tif_path, out_folder, masks_folder, file, out_format) for file in tqdm(mask_files))
     print('Done tiling TIFF: ', tif_path)
@@ -60,6 +61,7 @@ parser = ArgumentParser(description='Transforms TIFF to images of the same resol
 parser.add_argument('-t', '--tifpath', dest='tif_path', required=True, help='The path to the TIFF.', metavar='FILE')
 parser.add_argument('-m', '--masksfolder', dest='masks_folder', type=str, required=True, help='Path of the folder containing the masks.')
 parser.add_argument('-f', '--format', dest='out_format', type=str, default='jpg', help='File type of the output image.')
+parser.add_argument('-mfi', '--mask_folder_id', dest='mask_folder_id', type=str, default='_binary_imgs', help='The identification string that the binary mask folders have.')
 parser.set_defaults(func=tifToTiles)
 args = parser.parse_args()
 args.func(**vars(args))
