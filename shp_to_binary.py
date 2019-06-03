@@ -1,27 +1,29 @@
 import geopandas as gpd
+import matplotlib
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from argparse import ArgumentParser
-import os, multiprocessing, gdal, random
+import shutil, os, multiprocessing, gdal, random
 from math import sqrt
 from PIL import Image
-
+from shapely.geometry import mapping
 '''
 input: geopandas raw items (Polygons, MultiPolygons, etc)
 output: list of Polygons
 '''
 def getPolygons(items):
     polygons = []
-    if (type(items) == None):
-        return polygons
+    if (items == None or type(items) == None):
+        return None
     if (items.type == 'Polygon' or items.type == 'Point' or items.type == 'Line'):
         polygons.append(items)
         return polygons
     for item in items:
-        if (item.type == 'MultiPolygon'):
-            polygons += getPolygons(item)
+        #if (item.type == 'MultiPolygon'):
+        polygons += getPolygons(item)
     return polygons
 
 '''
@@ -62,8 +64,13 @@ def makeTile(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, x
     dataframe.plot(ax=ax, color='white')
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])
-    plt.savefig(out_path, format=out_format, aspect='normal', facecolor='black', pad_inches=0, bbox_inches=extent, dpi='figure')
+    plt.savefig(out_path, aspect='normal', facecolor='black', pad_inches=0, bbox_inches=extent, dpi='figure')
     plt.close()
+    img = Image.open(out_path)
+    if (not img.getbbox()):
+        img.close()
+        os.remove(out_path)
+    img.close()
     dataframe = None
 
 '''
@@ -72,10 +79,13 @@ output: additional pixels in the x and y dimensions that are needed to make the 
 '''
 def getProperDimensions(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, xmin, ymin, xmax, ymax, out_format, shp_path):
     makeTile(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, xmin, ymin, xmax, ymax, out_format, shp_path)
-    img = Image.open(out_path, mode='r')
-    trail_width, trail_height = img.size
-    img.close()
-    os.remove(out_path)
+    try:
+        img = Image.open(out_path, mode='r')
+        trail_width, trail_height = img.size
+        img.close()
+        os.remove(out_path)
+    except Exception as e:
+        return e
     if (trail_width < out_width):
         add_pix_x += 5
         getProperDimensions(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, xmin, ymin, xmax, ymax, out_format, shp_path)
@@ -106,18 +116,25 @@ def tilePolygon(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_
     height = ymax-ymin
     xlist = np.arange(xmin-x_size/2, xmax, stride)
     ylist = np.arange(ymin-y_size/2, ymax, stride)
+    paths = []
     if (len(xlist) <= 1):
         xlist = [xmin-x_size/2, xmin, random.uniform(xmin-x_size/2, xmax-x_size), xmax-x_size]
     if (len(ylist) <= 1):
         ylist = [ymin-y_size/2, ymin, random.uniform(ymin-y_size/2, ymax-y_size),ymax-y_size]
     if (get_size_params):
-        out_path = out_folder + '\\' + 'trail' + '.' + out_format
+        out_path = os.path.sep.join([out_folder, 'trail' + '.' + out_format])
         add_pix_x, add_pix_y = getProperDimensions(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, xlist[0], ylist[0], x_size, y_size, out_format, shp_path)
         return add_pix_x, add_pix_y
     for x in xlist:
         for y in ylist:
-            out_path = out_folder + '\\' + str(x).replace('.','_') + '__' + str(y).replace('.','_') + '__' + str(x+x_size).replace('.','_') + '__' + str(y+y_size).replace('.','_') + '.' + out_format
-            makeTile(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, x, y, x+x_size, y+y_size, out_format, shp_path)
+            out_path = os.path.sep.join([out_folder, str(x).replace('.','_')
+                                         + '__' + str(y).replace('.','_') + '__'
+                                         + str(x+x_size).replace('.','_') + '__'
+                                         + str(y+y_size).replace('.','_') + '.'
+                                         + out_format])
+            makeTile(out_path, pixel_res, out_width, out_height,
+                     add_pix_x, add_pix_y, x, y, x+x_size, y+y_size,
+                     out_format, shp_path)
 
 '''
 input: path to the shapefile, step size for output window,
@@ -131,8 +148,10 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
     try:
         os.mkdir(out_folder)
     except Exception as e:
-        print('Files already exist. Remove them if new ones are needed.', out_folder)
-        return
+         print('Files already exist. Remove them if new ones are needed.', out_folder)
+         return
+#        shutil.rmtree(out_folder)
+#        os.mkdir(out_folder)
     print('Starting to convert shapefile to binary masks.', shp_path)
     pixel_res = abs(pixel_res)
     if (tiff_path != None):
@@ -142,30 +161,34 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
         pixel_y_res = transform[5]
         pixel_res = sqrt(abs(pixel_x_res*pixel_y_res))
         del tiff
-    dataframe = gpd.read_file(shp_path)
+    try:
+        dataframe = gpd.read_file(shp_path)
+        dataframe.to_file(shp_path)
+    except Exception as e:
+        dataframe = None
+        print(e)
+        return
+    dataframe = dataframe.dropna()
+    map_coords = dataframe.total_bounds
     geometry = dataframe.geometry
     polygons = []
     for item in geometry.iteritems():
         if (type(item[1]) == None):
             break
-        polygons += getPolygons(item[1])
+        poly = getPolygons(item[1])
+        if (poly != None):
+            polygons += poly
     polybounds = []
     for poly in polygons:
         polybounds.append(poly.bounds)
     if (len(polybounds) < 1):
         print('No polygons found in shapefile.')
         return
-    map_coords = dataframe.total_bounds
     dataframe = None
     geometry = None
-    if (pixel_res < 1):
-        stride = stride * pixel_res
-        x_size = out_width*pixel_res
-        y_size = out_height*pixel_res
-    else:
-        stride = stride / pixel_res
-        x_size = out_width/pixel_res
-        y_size = out_height/pixel_res
+    stride = stride * pixel_res
+    x_size = out_width*pixel_res
+    y_size = out_height*pixel_res
     add_pix_x, add_pix_y = tilePolygon(polybounds[0], shp_path, out_folder, stride, pixel_res, out_width, out_height, out_format, add_pix_x, add_pix_y, x_size, y_size, get_size_params=True)
     print('Pixels added to width: ', add_pix_x)
     print('Pixels added to height: ', add_pix_y)

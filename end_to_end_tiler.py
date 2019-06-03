@@ -15,9 +15,8 @@ def tileTIFF(tif_path, masks):
 
 def tileEverything(shps_folder, tiffs_folder, out_width, out_height, stride):
     print("Master Tiler starting.")
-    num_cores = multiprocessing.cpu_count()
+    num_cores = max(1, multiprocessing.cpu_count()-1)
     masks_folders = Parallel(n_jobs=num_cores)(delayed(tileShp)(shp.path) for shp in os.scandir(shps_folder))
-    print('Number of binary mask folders: ', len(masks_folders))
     for masks in masks_folders:
         if (masks != None):
             Parallel(n_jobs=num_cores)(delayed(tileTIFF)(tif.path, masks) for tif in os.scandir(tiffs_folder))
