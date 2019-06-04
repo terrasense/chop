@@ -148,7 +148,7 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
     try:
         os.mkdir(out_folder)
     except Exception as e:
-         print('Files already exist. Remove them if new ones are needed.', out_folder)
+#         print('Files already exist. Remove them if new ones are needed.', out_folder)
          return
 #        shutil.rmtree(out_folder)
 #        os.mkdir(out_folder)
@@ -166,6 +166,7 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
         dataframe.to_file(shp_path)
     except Exception as e:
         dataframe = None
+        print('Dataframe error.')
         print(e)
         return
     dataframe = dataframe.dropna()
@@ -195,6 +196,7 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
     num_cores = multiprocessing.cpu_count()
     Parallel(n_jobs=num_cores)(delayed(tilePolygon)(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_height, out_format, add_pix_x, add_pix_y, x_size, y_size) for bounds in tqdm(polybounds))
     print('Done tiling and masking shapefile: ', shp_path)
+
 parser = ArgumentParser(description='Transforms the given shapefile to various tiled binary images of the desired format and size.')
 parser.add_argument('-shp', '--shapefile', dest='shp_path', required=True, help='The path to the shapefile.', metavar='FILE')
 parser.add_argument('-s', '--stride', dest='stride', type=int, default=500, help='Step size between tile edges. Default is 500.')
@@ -204,7 +206,8 @@ parser.add_argument('--add_x_pixel', dest='add_pix_x', type=int, default=0, help
 parser.add_argument('--add_y_pixel', dest='add_pix_y', type=int, default=0, help='Fine tune output image resolution, add pixels to height.')
 parser.add_argument('-f', '--format', dest='out_format', type=str, default='png', help='File type of the output image.')
 parser.add_argument('-t', '--tiff', dest='tiff_path', metavar='FILE', default=None, help='TIFF file for pixel resolution.')
-parser.add_argument('--pixel_res', dest='pixel_res', type=float, default=0.04, help='Pixel resolution. Defaults to 0.04 meters.')
+parser.add_argument('--pixel_res', dest='pixel_res', type=float,
+                    default=0.04, help='Pixel resolution. Defaults to 0.04 meters.')
 
 parser.set_defaults(func=shpToBinaryImg)
 args = parser.parse_args()

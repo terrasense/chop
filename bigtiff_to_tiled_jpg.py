@@ -12,13 +12,13 @@ def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, mask_name, out_
     try:
         bounds = os.path.splitext(mask_name)[0]
         mask_format = os.path.splitext(mask_name)[-1]
-        mask_path = os.path.sep.join([masks_folder, mask_name
+        mask_path = os.path.sep.join([masks_folder, mask_name])
         with Image.open(mask_path) as mask:
             out_width, out_height = mask.size
     except Exception as e:
         print(e)
         return
-    if (fmt not in ['.png', '.jpg', '.jpeg']):
+    if (mask_format not in ['.png', '.jpg', '.jpeg']):
         print('File format not supported: ', mask_name)
         return
     bounds = os.path.splitext(mask_name)[0]
@@ -56,7 +56,7 @@ def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, mask_name, out_
         out_img_window = None
         tif_window = None
         tif.close()
-        shutil.move(mask_path, new_img.replace(out_format, mask_format))
+        shutil.move(mask_path, new_img.replace('.'+out_format, mask_format))
         return 1
     tif.close()
 
