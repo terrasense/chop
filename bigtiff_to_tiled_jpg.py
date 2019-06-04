@@ -50,7 +50,10 @@ def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, mask_name, out_
         arr_row_off = int(intersection_window.row_off - out_img_window.row_off)
         img_arr[arr_row_off:arr_row_off+temp_arr.shape[0],
                 arr_col_off:arr_col_off+temp_arr.shape[1]] = temp_arr
-        cv2.imwrite(new_img, img_arr.astype('uint8'))
+        img = Image.fromarray(img_arr)
+        img = img.resize((out_width, out_height), Image.ANTIALIAS)
+        img.save(new_img)
+        #cv2.imwrite(new_img, img_arr.astype('uint8'))
         temp_arr = None
         intersection_window = None
         out_img_window = None
