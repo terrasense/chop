@@ -4,12 +4,16 @@ import timeit
 from argparse import ArgumentParser
 import subprocess
 
-def tileShp(shp_path, pixel_res):
+def tileShp(shp_path, pixel_res, extra_shps):
     if (shp_path.endswith('.shp')):
         subprocess.call(['python', 'shp_to_binary.py', '-shp', shp_path,
-                         '--pixel_res', str(pixel_res)])
-        return shp_path.replace('.shp', '_binary_imgs')
-
+                         '--pixel_res', str(pixel_res), '--extra_shapefiles',
+                        extra_shps])
+        if extra_shps == []:
+            imgs_path = shp_path.replace('.shp', '_binary_imgs')
+        else:
+            imgs_path = shp_path.replace('.shp', '_and_other_binary_imgs')
+        return imgs_path
 def tileTIFF(tif_path, masks):
     if (tif_path.endswith('.tif')):
         subprocess.call(['python', 'bigtiff_to_tiled_jpg.py', '-t', tif_path, '-m', masks])
@@ -25,10 +29,10 @@ def tileEverything(shps_folder, tiffs_folder, out_width, out_height,
             Parallel(n_jobs=num_cores)(delayed(tileTIFF)(tif.path, masks) for tif in os.scandir(tiffs_folder))
 
 def timer(shps_folder, tiffs_folder, out_width, out_height,
-          stride, pixel_res, **kwargs):
-    t = timeit.Timer("tileEverything({0!a}, {1!a}, {2}, {3}, {4}, {5})"
+          stride, pixel_res, extra_shps, **kwargs):
+    t = timeit.Timer("tileEverything({0!a}, {1!a}, {2}, {3}, {4}, {5}, {6})"
                      .format(shps_folder, tiffs_folder, out_width,
-                             out_height, stride, pixel_res),
+                             out_height, stride, pixel_res, extra_shps),
                      setup="from __main__ import tileEverything")
     print( "\t{:.2f}s\n".format(t.timeit(1)))
 
@@ -45,6 +49,10 @@ parser.add_argument('--stride', dest='stride', type=int, default=750,
                     help='Step size between tile edges. Default is 500.')
 parser.add_argument('--pixel_res', dest='pixel_res', type=float, default=0.04,
                     help='Resolution of pixels of saved image. Defaults to 0.04.')
+parser.add_argument('--extra_shapefiles', dest='extra_shps', nargs='+',
+                    default=[],
+                    help='Extra shapefiles to add in grey tones. Should be ' + 
+                    'provided in the desired depth wanted.')
 parser.set_defaults(func=timer)
 args = parser.parse_args()
 args.func(**vars(args))

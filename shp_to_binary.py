@@ -22,7 +22,6 @@ def getPolygons(items):
         polygons.append(items)
         return polygons
     for item in items:
-        #if (item.type == 'MultiPolygon'):
         polygons += getPolygons(item)
     return polygons
 
@@ -48,29 +47,50 @@ input: output file name and path, the resolution of one pixel,
         list of x and y 
 effect: saves an image of the desired format with the dimensions provided
 '''
-def makeTile(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y, xmin, ymin, xmax, ymax, out_format, shp_path):
+def makeTile(out_path, pixel_res, out_width, out_height, add_pix_x, add_pix_y,
+             xmin, ymin, xmax, ymax, out_format, shp_path,
+             extra_shp_files=[]):
     dataframe = gpd.read_file(shp_path)
-    fig = plt.figure(frameon=False, dpi=1/pixel_res*39.37)
+    fig = plt.figure(frameon=False, dpi=1/pixel_res*39.37, facecolor='black')
     ax = fig.add_subplot(111)
     dpi = fig.get_dpi()
     ax = setAxisSize(out_width, out_height, dpi, ax, add_pix_x, add_pix_y)
     ax.set_aspect('equal')
+    ax.set_facecolor('black')
     fig.canvas.draw()
     ax.margins(0)
     ax.tick_params(which='both', direction='in')
     ax.axis('off')
     ax.set_axis_off()
     extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-    dataframe.plot(ax=ax, color='white')
+    patch = matplotlib.patches.Rectangle((xmin,ymin),xmax-xmin, ymax-ymin,
+                                 color='black', zorder=0) 
+    ax.add_patch(patch)
+    extra_dfs = []
+    if (extra_shp_files != []):
+        for shp in extra_shp_files:
+            extra_dfs.append(gpd.read_file(shp))
+        gray_shades = 1/(len(extra_dfs)+1)
+        for df in extra_dfs:
+            df.plot(ax=ax, facecolor='black', color=str(gray_shades))
+            gray_shades += gray_shades
+    dataframe.plot(ax=ax, facecolor='black', color='white')
+    fig.set_facecolor('black')
+    fig.Color = 'black'
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])
-    plt.savefig(out_path, aspect='normal', facecolor='black', pad_inches=0, bbox_inches=extent, dpi='figure')
+    plt.savefig(out_path, aspect='normal',
+                facecolor='r', pad_inches=0, bbox_inches=extent,
+                dpi='figure', edgecolor='none', transparent=False)
     plt.close()
     img = Image.open(out_path)
-    if (not img.getbbox()):
+    if (img.convert("L").getextrema() == (0,0)):
         img.close()
         os.remove(out_path)
     img.close()
+    for df in extra_dfs:
+        df = None
+    extra_dfs = None
     dataframe = None
 
 '''
@@ -107,7 +127,10 @@ input: outer bounds of square area, path to the shapefile, output folder path,
 effect: helper, creates binary images based on the provided shapefile and
         the desired output file format
 '''
-def tilePolygon(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_height, out_format, add_pix_x, add_pix_y, x_size, y_size, get_size_params=False):
+def tilePolygon(bounds, shp_path, out_folder, stride, pixel_res,
+                out_width, out_height, out_format, add_pix_x,
+                add_pix_y, x_size, y_size, get_size_params=False,
+                extra_shp_files=[]):
     xmin = bounds[0]
     ymin = bounds[1]
     xmax = bounds[2]
@@ -134,7 +157,7 @@ def tilePolygon(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_
                                          + out_format])
             makeTile(out_path, pixel_res, out_width, out_height,
                      add_pix_x, add_pix_y, x, y, x+x_size, y+y_size,
-                     out_format, shp_path)
+                     out_format, shp_path, extra_shp_files=extra_shp_files)
 
 '''
 input: path to the shapefile, step size for output window,
@@ -143,15 +166,19 @@ input: path to the shapefile, step size for output window,
 effect: creates binary images based on the provided shapefile and
         the desired output file format
 '''
-def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_path, pixel_res, add_pix_x, add_pix_y, **kwargs):
-    out_folder = shp_path.replace('.shp', str(r'_binary_imgs'))
+def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format,
+                   tiff_path, pixel_res, add_pix_x, add_pix_y,
+                   extra_shps, **kwargs):
+    if extra_shps == []:
+        out_folder = shp_path.replace('.shp', str(r'_binary_imgs'))
+    else:
+        out_folder = shp_path.replace('.shp', str(r'_and_other_binary_imgs'))
     try:
         os.mkdir(out_folder)
     except Exception as e:
 #         print('Files already exist. Remove them if new ones are needed.', out_folder)
-         return
-#        shutil.rmtree(out_folder)
-#        os.mkdir(out_folder)
+        shutil.rmtree(out_folder)
+        os.mkdir(out_folder)
     print('Starting to convert shapefile to binary masks.', shp_path)
     pixel_res = abs(pixel_res)
     if (tiff_path != None):
@@ -172,13 +199,23 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
     dataframe = dataframe.dropna()
     map_coords = dataframe.total_bounds
     geometry = dataframe.geometry
+    geometries = [geometry]
+    if extra_shps != []:
+        for shp in extra_shps:
+            df = gpd.read_file(shp)
+            df.to_file(shp)
+            geom = df.geometry
+            geometries.append(geom)
+            df = None
+            geom = None
     polygons = []
-    for item in geometry.iteritems():
-        if (type(item[1]) == None):
-            break
-        poly = getPolygons(item[1])
-        if (poly != None):
-            polygons += poly
+    for geometry in geometries:
+        for item in geometry.iteritems():
+            if (type(item[1]) == None):
+                break
+            poly = getPolygons(item[1])
+            if (poly != None):
+                polygons += poly
     polybounds = []
     for poly in polygons:
         polybounds.append(poly.bounds)
@@ -194,7 +231,14 @@ def shpToBinaryImg(shp_path, stride, out_width, out_height, out_format, tiff_pat
     print('Pixels added to width: ', add_pix_x)
     print('Pixels added to height: ', add_pix_y)
     num_cores = multiprocessing.cpu_count()
-    Parallel(n_jobs=num_cores)(delayed(tilePolygon)(bounds, shp_path, out_folder, stride, pixel_res, out_width, out_height, out_format, add_pix_x, add_pix_y, x_size, y_size) for bounds in tqdm(polybounds))
+    Parallel(n_jobs=num_cores)(delayed(tilePolygon)(bounds, shp_path,out_folder,
+                                                    stride, pixel_res,
+                                                    out_width, out_height,
+                                                    out_format, add_pix_x,
+                                                    add_pix_y, x_size,
+                                                    y_size,
+                                                    extra_shp_files=extra_shps)
+                               for bounds in tqdm(polybounds))
     print('Done tiling and masking shapefile: ', shp_path)
 
 parser = ArgumentParser(description='Transforms the given shapefile to various tiled binary images of the desired format and size.')
@@ -208,7 +252,9 @@ parser.add_argument('-f', '--format', dest='out_format', type=str, default='png'
 parser.add_argument('-t', '--tiff', dest='tiff_path', metavar='FILE', default=None, help='TIFF file for pixel resolution.')
 parser.add_argument('--pixel_res', dest='pixel_res', type=float,
                     default=0.04, help='Pixel resolution. Defaults to 0.04 meters.')
-
+parser.add_argument('--extra_shapefiles', dest='extra_shps', default=[],
+                    nargs='*',
+                    help='A list of paths of shapefiles that will be tiled together.')
 parser.set_defaults(func=shpToBinaryImg)
 args = parser.parse_args()
 args.func(**vars(args))

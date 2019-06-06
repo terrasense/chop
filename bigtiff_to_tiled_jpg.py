@@ -6,62 +6,95 @@ from argparse import ArgumentParser
 import rasterio
 from rasterio import windows
 import numpy as np
-import cv2
 
-def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, mask_name, out_format):
-    try:
-        bounds = os.path.splitext(mask_name)[0]
-        mask_format = os.path.splitext(mask_name)[-1]
-        mask_path = os.path.sep.join([masks_folder, mask_name])
-        with Image.open(mask_path) as mask:
-            out_width, out_height = mask.size
-    except Exception as e:
-        print(e)
-        return
-    if (mask_format not in ['.png', '.jpg', '.jpeg']):
-        print('File format not supported: ', mask_name)
-        return
+def getMaskCoordsAndOutDim(masks_folder, mask_name):
     bounds = os.path.splitext(mask_name)[0]
-    new_img = os.path.sep.join([out_folder, bounds + '.' + out_format])
+    mask_path = os.path.sep.join([masks_folder, mask_name])
+    with Image.open(mask_path) as mask:
+        out_width, out_height = mask.size
     coords = []
     for bound in bounds.split('__'):
         coords.append(float(bound.replace('_','.')))
-    coords_left, coords_bottom, coords_right, coords_top = coords
-    try:
-        tif = rasterio.open(tif_path)
-    except Exception as e:
-        print(e)
-        return
-    tif_left, tif_bottom, tif_right, tif_top = tif.bounds
+    del bounds
+    return coords, out_width, out_height
+
+def makeTifAndImageWindow(transform, width, height, bounds, coords):
     window_maker = windows.WindowMethodsMixin()
-    window_maker.transform = tif.transform
-    window_maker.height = tif.height
-    window_maker.width = tif.width
+    window_maker.transform = transform
+    window_maker.height = height
+    window_maker.width = width
     out_img_window = window_maker.window(*coords)
-    tif_window = window_maker.window(*tif.bounds)
-    if (windows.intersect([out_img_window, tif_window])):
-        intersection_window = out_img_window.intersection(tif_window) 
-        img_arr = np.stack([np.zeros((int(out_img_window.width),
-                                    int(out_img_window.height))) for i in range(3)],
-                           axis=2)
-        temp_arr = np.stack([tif.read(4-i, window=intersection_window)
-                             for i in range(1,4)], axis=2)
-        arr_col_off = int(intersection_window.col_off - out_img_window.col_off)
-        arr_row_off = int(intersection_window.row_off - out_img_window.row_off)
-        img_arr[arr_row_off:arr_row_off+temp_arr.shape[0],
-                arr_col_off:arr_col_off+temp_arr.shape[1]] = temp_arr
-        img = Image.fromarray(img_arr)
-        img = img.resize((out_width, out_height), Image.ANTIALIAS)
-        img.save(new_img)
-        #cv2.imwrite(new_img, img_arr.astype('uint8'))
-        temp_arr = None
-        intersection_window = None
-        out_img_window = None
-        tif_window = None
-        tif.close()
-        shutil.move(mask_path, new_img.replace('.'+out_format, mask_format))
-        return 1
-    tif.close()
+    tif_window = window_maker.window(*bounds)
+    del window_maker
+    return tif_window, out_img_window
+
+def cropTifToMaskCoordinates(tif_path, out_folder, masks_folder, mask_name,
+                             out_format, tif_left, tif_bottom, tif_right,
+                             tif_top):
+    found_overlap = 0
+    coords,out_width,out_height=getMaskCoordsAndOutDim(masks_folder,mask_name)
+    mask_format = os.path.splitext(mask_name)[-1]
+    if mask_format not in ['.png', '.jpg', '.jpeg']:
+        return found_overlap
+    new_img_path = os.path.sep.join([out_folder, mask_name.replace(mask_format,
+                                                                   '.'+out_format)])
+    mask_path = os.path.sep.join([masks_folder, mask_name])
+    with rasterio.open(tif_path) as tif:
+        tif_window, out_img_window = makeTifAndImageWindow(tif.transform,
+                                                           tif.width,
+                                                           tif.height,
+                                                          tif.bounds,
+                                                          coords)
+        if (windows.intersect([out_img_window, tif_window])):
+            intersection_window = out_img_window.intersection(tif_window) 
+            img_arr = np.stack([np.zeros((int(out_img_window.width),
+                                        int(out_img_window.height))) for i in range(3)],
+                               axis=2)
+            try:
+                temp_arr = np.stack([tif.read(4-i, window=intersection_window)
+                                 for i in range(1,4)], axis=2)
+                arr_col_off = int(intersection_window.col_off - out_img_window.col_off)
+                arr_row_off = int(intersection_window.row_off - out_img_window.row_off)
+                img_arr[arr_row_off:arr_row_off+temp_arr.shape[0],
+                        arr_col_off:arr_col_off+temp_arr.shape[1]] = temp_arr
+                img = Image.fromarray(img_arr.astype('uint8'))
+                del temp_arr, img_arr
+                img = img.resize((out_width, out_height), Image.ANTIALIAS)
+                if (img.convert("L").getextrema() != (0,0)):
+                    mask_img = Image.open(mask_path)
+                    mask_img = mask_img.convert('RGB')
+                    images = [img, mask_img]
+                    widths, heights = zip(*(i.size for i in images))
+                    total_width = sum(widths)
+                    max_height = max(heights)
+                    new_img = Image.new('RGB', (total_width, max_height), 'black')
+                    x_offset = 0
+                    for i in images:
+                        new_img.paste(i, (x_offset, 0))
+                        x_offset += i.size[0]
+                    new_img.save(new_img_path)
+                    images = []
+                    new_img.close()
+                    mask_img.close()
+                    found_overlap = 1
+                img.close()
+            except Exception as e:
+                print(e)
+        del out_img_window, tif_window, intersection_window
+    return found_overlap
+
+def getOverlapping(tif_left, tif_bottom, tif_right, tif_top, mask_name):
+    bounds = os.path.splitext(mask_name)[0].split('__')
+    msk_left, msk_bottom, msk_right, msk_top = [float(bound.replace('_','.'))
+                                                for bound in bounds] 
+    left = max(msk_left, tif_left)
+    bottom = max(msk_bottom, tif_bottom)
+    right = min(msk_right, tif_right)
+    top = min(msk_top, tif_top)
+    if (left < right and bottom < top):
+        return mask_name
+    else:
+        return None
 
 def tifToTiles(tif_path, masks_folder, out_format, mask_folder_id, **kwargs):
     mask_files = os.listdir(masks_folder)
@@ -73,13 +106,29 @@ def tifToTiles(tif_path, masks_folder, out_format, mask_folder_id, **kwargs):
         #print('Files seem to already exist. Remove them if new ones are needed.', out_folder)
         shutil.rmtree(out_folder) 
         os.mkdir(out_folder)
+    with rasterio.open(tif_path) as tif:
+        tif_left, tif_bottom, tif_right, tif_top = tif.bounds
     print('Starting to convert tif to tiled images of ' + masks_object, tif_path)
     num_cores = max(1, multiprocessing.cpu_count()-1)
-    results = Parallel(n_jobs=num_cores)(delayed(cropTifToMaskCoordinates)
-                                         (tif_path, out_folder, masks_folder,
-                                          mask_name, out_format) 
-                                         for mask_name in tqdm(mask_files))
-    print('length '+tif_path +' '+masks_object, np.count_nonzero(results))
+    intersecting = Parallel(n_jobs=num_cores)(delayed(getOverlapping)
+                                              (tif_left, tif_bottom,
+                                               tif_right, tif_top,
+                                               mask_name)
+                                              for mask_name in
+                                              tqdm(mask_files))
+    intersecting = [entry for entry in intersecting if entry is not None]
+    print('Number of preliminary intersections: ', len(intersecting))
+    for mask_name in tqdm(intersecting):
+        cropTifToMaskCoordinates(tif_path, out_folder, masks_folder,
+                                 mask_name, out_format, tif_left,
+                                 tif_bottom, tif_right, tif_top) 
+#    results = Parallel(n_jobs=num_cores)(delayed(cropTifToMaskCoordinates)
+#                                         (tif_path, out_folder, masks_folder,
+#                                          mask_name, out_format, tif_left,
+#                                          tif_bottom, tif_right, tif_top) 
+#                                         for mask_name in tqdm(intersecting))
+   # print('Total image overlaps found between '+tif_path+' and '+masks_object,
+   #       np.count_nonzero(results))
     print('Done tiling TIFF: ', tif_path)
 
 parser = ArgumentParser(description='Transforms TIFF to images of the same resolution as their relative binary masks, bounded by the same coordinate.')
