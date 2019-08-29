@@ -23,8 +23,7 @@ The ‘-shp’ parameter is the shapefile that will be placed in the front-most 
 Any shapefiles inputted through ‘- -extrashapefiles’  will be placed in layers that correspond to their input order
 ‘-shp rectangle.shp --extra_shapefiles circle.shp triangle.shp’
 
-![Mask Image]
-(https://github.com/terrasense/chop/blob/master/mask_example.PNG)
+![Image of Mask](https://github.com/terrasense/chop/blob/master/mask_example.PNG)
 
 i.e. shapes in the rectangle.shp file will occlude those in the extra shapefiles
 
